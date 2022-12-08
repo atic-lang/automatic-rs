@@ -1,0 +1,9 @@
+/target
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
+.idea/.gitignore
+.vscode/tasks.json
+backend.iml
+Cargo.lock
+res/input.txt
