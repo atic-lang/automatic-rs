@@ -1,21 +1,34 @@
-mod vm;
 mod linker;
+mod vm;
 
-use std::time::{SystemTime};
+use num_format::{Locale, ToFormattedString};
+use std::time::SystemTime;
 use std::{fs::File, io::Read, vec};
 
 use regex::Regex;
 
+use crate::linker::Linker;
+use crate::vm::{VM, Callable};
 use crate::Node::*;
 use crate::ParseEntry::*;
-use crate::linker::Linker;
-use crate::vm::VM;
 
 fn main() {
+
+    if true {
+        //let f = 1030605077.0;
+        //let mut b = 0.0;
+        //let time = SystemTime::now();
+        //while b < f {
+        //    b += 1.0;
+        //}
+        //let later = SystemTime::now();
+        //let length = later.duration_since(time).unwrap().as_millis();
+        //println!("Took {}ms in Rust", length);
+        //return;
+    }
+
     let lst = Node::construct(&[1, 2, 3, 4, 5, 6]);
     lst.print();
-
-
 
     let mut file = File::open("res/input.txt").unwrap();
     let mut result = String::new();
@@ -23,25 +36,41 @@ fn main() {
         .expect("Cant read input File");
     let cfg = ParserConfig::new();
     let mut lines = result.lines();
-    let time = SystemTime::now();
+    let mut time = SystemTime::now();
 
-    match generate(&mut lines, &cfg) {
-        Ok(list) => {
-           for function in list {
-                let mut linker: Linker = Default::default();
-                linker.feed_instructions(&function.instructions);
-           }
-        }
-        Err(s) => {
-            println!("error {}", s);
+    let mut list = generate(&mut lines, &cfg).expect("Error generating");
+    let mut callables: Vec<Callable> = vec![];
+    let mut linker: Linker = Default::default();
+    for function in &mut list {
+        let adress = linker.instructions.len();
+        function.temp_adress = adress as i32;
+        let mut referenced= linker.feed_instructions(&function.instructions);
+        callables.append(&mut referenced);
+    }
+    for callable in &mut callables {
+        let name = &callable.name;
+        let query = list.iter().find(|ele| ele.name.eq(name.as_ref()));
+        if let Some(fcn) = query {
+            callable.adress = fcn.temp_adress;
+            callable.args = fcn.args;
+            callable.registers = fcn.size;
+        } else {
+            panic!("Cant find function {}", name);
         }
     }
-    let test = VM::new(vec![]);
+    let query = list.iter().find(|ele| ele.name.eq("Main.main")).expect("Find Main Function");
+    let mut vm = VM::new(linker.instructions);
+    vm.start(query.temp_adress, query.args);
+    time = SystemTime::now();
+    while vm.running() {
+        vm.tick();
+    }
     let later = SystemTime::now();
     let length = later.duration_since(time).unwrap().as_millis();
-    println!("Took {}ms", length);
-} 
-
+    let length_sec = (length as f64) / 1000.0;
+    let format = ((vm.dbg_iter as f64/length_sec) as i64).to_formatted_string(&Locale::en);
+    println!("Took {}ms with {} steps ({} Instructions per Second)", length, vm.dbg_iter, format);
+}
 
 struct ParserConfig {
     function_regex: Regex,
@@ -85,7 +114,7 @@ fn generate(
                     instructions.push(ParseInstruction(UnparsedInstruction { name, params }));
                 } else if let Some(arg) = config.label_regex.captures(arg) {
                     let jump_label = arg.get(1).unwrap().as_str();
-                    instructions.push(ParseLabel(jump_label.to_string()));
+                    instructions.push(ParseLabel(jump_label.trim().to_string()));
                 } else {
                     if let Some(params) = config.register_regex.captures(arg) {
                         let parse = params.get(1).unwrap().as_str().to_string().parse::<f64>();
@@ -135,6 +164,7 @@ fn generate(
                 args: params,
                 instructions,
                 size: register_target.unwrap(),
+                temp_adress: 0,
             });
         }
     }
@@ -146,9 +176,8 @@ struct Function {
     size: i32,
     instructions: Vec<ParseEntry>,
     args: i32,
+    temp_adress: i32,
 }
-
-
 
 pub enum ParseEntry {
     ParseInstruction(UnparsedInstruction),

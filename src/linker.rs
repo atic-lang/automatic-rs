@@ -1,7 +1,10 @@
-use std::{collections::{HashMap, btree_map::Entry}, vec};
+use std::{
+    collections::{btree_map::Entry, HashMap},
+    vec,
+};
 
+use crate::linker::Instruction::*;
 use crate::{ParseEntry::*, UnparsedInstruction};
-use crate::{linker::Instruction::*};
 
 extern crate fxhash;
 use fxhash::FxHashMap;
@@ -9,8 +12,8 @@ use fxhash::FxHashMap;
 use crate::{vm::Callable, ParseEntry};
 #[derive(Default)]
 pub struct Linker {
-    instructions: Vec<Instruction>,
-}    
+    pub instructions: Vec<Instruction>,
+}
 
 impl Linker {
     fn push(&mut self, obj: Instruction) {
@@ -18,30 +21,26 @@ impl Linker {
     }
 
     pub fn feed_instructions(&mut self, instructions: &Vec<ParseEntry>) -> Vec<Callable> {
-        let mut resolved = FxHashMap::<i32, i32>::default();
-        let mut to_resolve = FxHashMap::<i32, &dyn Fn(i32)>::default();
+        let mut labels = FxHashMap::<i32, i32>::default();
         let additional_callables = vec![];
+        let mut function_instructions = vec![];
         for entry in instructions {
-            let index = self.instructions.len();
+            let index = (function_instructions.len() + self.instructions.len()) as i32;
             match &entry {
                 ParseLabel(str) => {
-                    let label = str.parse::<i32>().unwrap();
-                    if let Some(consumer) = to_resolve.get(&label) {
-                        consumer(label);
-                        to_resolve.remove(&label);
-                    }
-                    resolved.insert(label, index as i32);
-                },
-                ParseInstruction(UnparsedInstruction {name, params}) => {
+                    let label = str.parse::<f64>().unwrap() as i32;
+                    labels.insert(label, index);
+                }
+                ParseInstruction(UnparsedInstruction { name, params }) => {
                     let empty = String::new();
 
                     let s1 = params.get(0).unwrap_or(&empty);
                     let s2 = params.get(1).unwrap_or(&empty);
                     let s3 = params.get(2).unwrap_or(&empty);
 
-                    let i0 = s1.parse::<f64>().unwrap_or(0.0) as i32;
-                    let i1 = s2.parse::<f64>().unwrap_or(0.0) as i32;
-                    let i2 = s3.parse::<f64>().unwrap_or(0.0) as i32;
+                    let i0 = s1.parse::<f64>().unwrap_or(0.0) as i8;
+                    let i1 = s2.parse::<f64>().unwrap_or(0.0) as i8;
+                    let i2 = s3.parse::<f64>().unwrap_or(0.0) as i8;
 
                     let f0 = s1.parse::<f64>().unwrap_or(0.0);
                     let f1 = s2.parse::<f64>().unwrap_or(0.0);
@@ -51,17 +50,24 @@ impl Linker {
                     print!(" {} ", i0);
                     print!(" {} ", i1);
                     println!(" {} ", i2);
-                    
-                    self.push(match name.as_str() {
-                        "Add" => {
-                            Add(i0, i1, i2)
-                        },
-                        "LoadConst" => {
-                            LoadConst(i0, f0)
-                        },
-                        "Debug" => {
-                            Debug(i0)
-                        },
+
+                    function_instructions.push(match name.as_str() {
+                        "Add" => Add(i0, i1, i2),
+                        "Smaller" => Smaller(i0, i1, i2),
+                        "LoadConst" => LoadConst(i0, f1),
+                        "Exit" => Exit(f0),
+                        "Debug" => Debug(i0),
+                        "Jump" => Jump(Box::new(Label {
+                            index: i0,
+                            adress: -1,
+                        })),
+                        "JumpIfNot" => JumpIfNot(
+                            i0,
+                            Box::new(Label {
+                                index: i1,
+                                adress: -1,
+                            }),
+                        ),
                         _ => {
                             panic!("Unknown cmd {}", name)
                         }
@@ -69,12 +75,41 @@ impl Linker {
                 }
             }
         }
+        for ele in function_instructions {
+            self.push(match ele {
+                Jump(target) => {
+                    if let Some(adress) = labels.get(&(target.index as i32)) {
+                        Jump(Box::new(Label {
+                            index: target.index,
+                            adress: *adress,
+                        }))
+                    } else {
+                        panic!("Jump: Cant find Adress of Label {}", target.index);
+                    }
+                }
+                JumpIfNot(register, target) => {
+                    if let Some(adress) = labels.get(&(target.index as i32)) {
+                        JumpIfNot(
+                            register,
+                            Box::new(Label {
+                                index: target.index,
+                                adress: *adress,
+                            }),
+                        )
+                    } else {
+                        panic!("JumpIfNot: Cant find Adress of Label {}", target.index);
+                    }
+                }
+                rest => rest,
+            });
+        }
 
         additional_callables
     }
 }
 
-type Register = i32;
+type Register = i8;
+type Offset = i8;
 pub enum Instruction {
     Nop,
     Debug(Register),
@@ -82,26 +117,26 @@ pub enum Instruction {
     Copy(Register, Register),
     Not(Register, Register),
     Negate(Register, Register),
-    LoadString(Register, String),
-    LoadFunction(Register, Callable),
-    Argument(i32, Register),
+    LoadString(Register, Box<String>),
+    LoadFunction(Register, Box<Callable>),
+    Argument(Offset, Register),
     Exit(f64),
     InvokeFunction(Register, Register),
     Return(Register),
-    JumpIfNot(Register, Label),
-    Jump(Label),
-    LoadMember(Register, Register, i32),
+    JumpIfNot(Register, Box<Label>),
+    Jump(Box<Label>),
+    LoadMember(Register, Register, Offset),
     LoadArray(Register, Register, Register),
-    StoreMember(Register, Register, i32),
+    StoreMember(Register, Register, Offset),
     StoreArray(Register, Register, Register),
-    CreateStruct(Register, i32),
-    CreateEnumEntry(Register, i32, i32),
-    CreateClosure(Register, i32),
+    CreateStruct(Register, Offset),
+    CreateEnumEntry(Register, Offset, Offset),
+    CreateClosure(Register, Offset),
     LoadEnumType(Register, Register),
-    LoadEnumMember(Register, Register, i32),
-    CopyEnumMember(Register, Register, i32),
+    LoadEnumMember(Register, Register, Offset),
+    CopyEnumMember(Register, Register, Offset),
     Throw(Register),
-    Match(Register, Label, FxHashMap<Register, Label>),
+    Match(Register, Box<Label>, Box<FxHashMap<Register, Label>>),
     Add(Register, Register, Register),
     Subtract(Register, Register, Register),
     Multiply(Register, Register, Register),
@@ -119,7 +154,7 @@ pub enum Instruction {
     Concat(Register, Register, Register),
 }
 
-struct Label {
-    index: i32,
-    adress: i32,
+pub struct Label {
+    pub index: i8,
+    pub adress: i32,
 }
