@@ -57,6 +57,8 @@ impl Linker {
                         "LoadConst" => LoadConst(i0, f1),
                         "Exit" => Exit(f0),
                         "Debug" => Debug(i0),
+                        "Argument" => Argument(i0, i1),
+                        "CreateStruct" => CreateStruct(i0, i1),
                         "Jump" => Jump(Box::new(Label {
                             index: i0,
                             adress: -1,

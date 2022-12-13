@@ -8,12 +8,11 @@ use std::{fs::File, io::Read, vec};
 use regex::Regex;
 
 use crate::linker::Linker;
-use crate::vm::{VM, Callable};
+use crate::vm::{Callable, VM};
 use crate::Node::*;
 use crate::ParseEntry::*;
 
 fn main() {
-
     if true {
         //let f = 1030605077.0;
         //let mut b = 0.0;
@@ -44,9 +43,10 @@ fn main() {
     for function in &mut list {
         let adress = linker.instructions.len();
         function.temp_adress = adress as i32;
-        let mut referenced= linker.feed_instructions(&function.instructions);
+        let mut referenced = linker.feed_instructions(&function.instructions);
         callables.append(&mut referenced);
     }
+
     for callable in &mut callables {
         let name = &callable.name;
         let query = list.iter().find(|ele| ele.name.eq(name.as_ref()));
@@ -58,9 +58,13 @@ fn main() {
             panic!("Cant find function {}", name);
         }
     }
-    let query = list.iter().find(|ele| ele.name.eq("Main.main")).expect("Find Main Function");
+    let query = list
+        .iter()
+        .find(|ele| ele.name.eq("Main.main"))
+        .expect("Find Main Function");
+    println!("{}", linker.instructions.len());
     let mut vm = VM::new(linker.instructions);
-    vm.start(query.temp_adress, query.args);
+    vm.start(query.temp_adress as usize, query.args as usize);
     time = SystemTime::now();
     while vm.running() {
         vm.tick();
@@ -68,8 +72,11 @@ fn main() {
     let later = SystemTime::now();
     let length = later.duration_since(time).unwrap().as_millis();
     let length_sec = (length as f64) / 1000.0;
-    let format = ((vm.dbg_iter as f64/length_sec) as i64).to_formatted_string(&Locale::en);
-    println!("Took {}ms with {} steps ({} Instructions per Second)", length, vm.dbg_iter, format);
+    let format = ((vm.dbg_iter as f64 / length_sec) as i64).to_formatted_string(&Locale::en);
+    println!(
+        "Took {}ms with {} steps ({} Instructions per Second)",
+        length, vm.dbg_iter, format
+    );
 }
 
 struct ParserConfig {
@@ -80,6 +87,7 @@ struct ParserConfig {
     define_regex: Regex,
     instruction_regex: Regex,
 }
+
 impl ParserConfig {
     fn new() -> ParserConfig {
         ParserConfig {
@@ -184,7 +192,6 @@ pub enum ParseEntry {
     ParseLabel(String),
 }
 
-//TODO make name and params type &str
 pub struct UnparsedInstruction {
     name: String,
     params: Vec<String>,
